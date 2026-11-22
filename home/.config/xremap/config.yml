@@ -1,0 +1,15 @@
+# macOS-style clipboard shortcuts: Alt+C / Alt+V / Alt+X act like Cmd+C / Cmd+V / Cmd+X.
+#
+# Outside terminals they are translated to Ctrl+C/V/X, so Ctrl+C keeps its usual meaning there too.
+# Terminals are skipped on purpose: Ghostty has Alt+C / Alt+V bound itself (see ~/.config/ghostty/config),
+# which keeps Ctrl+C = SIGINT intact and lets Alt+C pass through when nothing is selected.
+# Add more rows (Alt-a, Alt-z, Alt-s, Alt-f, Alt-w, Alt-t ...) the same way if you want more of macOS.
+keymap:
+  - name: Cmd-style clipboard (non-terminal apps)
+    application:
+      not:
+        - /(?i)ghostty|kitty|konsole|alacritty|foot|wezterm|xterm/
+    remap:
+      Alt-c: C-c
+      Alt-v: C-v
+      Alt-x: C-x

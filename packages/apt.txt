@@ -1,0 +1,46 @@
+# Installed with: apt-get install --no-install-recommends (keeps GNOME Shell/GDM out of Kubuntu)
+# terminal + file manager
+ghostty
+nautilus
+python3-nautilus
+gvfs-backends
+file-roller
+# cli tools
+tmux
+fzf
+bat
+eza
+btop
+lazygit
+neovim
+wl-clipboard
+xclip
+git-delta
+tealdeer
+ncdu
+duf
+hyperfine
+gping
+procs
+httpie
+ripgrep
+fd-find
+zoxide
+starship
+jq
+fastfetch
+curl
+unzip
+git
+# shell plugins
+zsh-autosuggestions
+zsh-syntax-highlighting
+# helpers used by the installer (usually present on Kubuntu)
+qdbus-qt6
+libkf6config-bin
+libkf6service-bin
+libglib2.0-bin
+xdg-utils
+libnotify-bin
+python3
+python3-pil

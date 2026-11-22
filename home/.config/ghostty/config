@@ -1,0 +1,54 @@
+# Ghostty — ported from the old kitty config (Ryoku Dark palette)
+
+# Font
+font-family = SpaceMono Nerd Font
+font-size = 11.5
+
+# Window
+background-opacity = 0.92
+background-blur = true
+window-padding-x = 16
+window-padding-y = 14
+window-decoration = auto
+gtk-titlebar = false
+confirm-close-surface = false
+window-show-tab-bar = auto
+gtk-tabs-location = bottom
+
+# Cursor / mouse / scrollback
+cursor-style = bar
+cursor-style-blink = true
+cursor-color = #ff8a94
+cursor-text = #1c1113
+mouse-hide-while-typing = true
+copy-on-select = clipboard
+scrollback-limit = 25000000
+
+# Colours
+foreground = #f1dcd6
+background = #1c1113
+selection-foreground = #1c1113
+selection-background = #f29aa0
+
+palette = 0=#231619
+palette = 1=#ef6f6c
+palette = 2=#8fd1b8
+palette = 3=#e3b36b
+palette = 4=#e0707a
+palette = 5=#c9a0d6
+palette = 6=#8fd1c8
+palette = 7=#e8d3cd
+palette = 8=#6b5558
+palette = 9=#f58f8c
+palette = 10=#a9e0cb
+palette = 11=#f0c98a
+palette = 12=#f29aa0
+palette = 13=#dcbbe6
+palette = 14=#a9e2dc
+palette = 15=#fff2ee
+
+# macOS-style clipboard: Alt+C / Alt+V. `performable` means Alt+C only acts when
+# something is selected, otherwise the key still reaches the shell (readline etc.).
+# Ctrl+C stays SIGINT, Ctrl+Shift+C/V keep working as well.
+keybind = performable:alt+c=copy_to_clipboard
+keybind = alt+v=paste_from_clipboard

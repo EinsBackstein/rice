@@ -1,0 +1,536 @@
+#!/usr/bin/env python3
+"""ai-usage — one place for your AI plan limits (5-hour / weekly windows).
+
+A small Linux take on the "AI agents" panel of Vorssaint (macOS).
+
+Sources
+  Claude  Claude Code pipes its plan limits into the status line command. `ai-usage statusline`
+          is that command: it stores the numbers and prints a short status. If Claude Code
+          has not run lately, the (rate-limited, undocumented) OAuth usage endpoint is used
+          as a slow fallback, at most every 10 minutes, with backoff on HTTP 429.
+  Antigravity  `agy -p /usage` (local quota table, cached 5 min).
+  OpenCode Go  https://opencode.ai/zen/go/v1/usage per API key (the keys CLIProxyAPI holds), cached 5 min.
+  Codex   Codex logs a rate-limit snapshot with every turn in ~/.codex/sessions/**.jsonl;
+          the newest snapshot is read locally (no network, no credentials touched).
+
+Commands
+  ai-usage              pretty terminal view
+  ai-usage json         machine-readable (used by the Plasma widget)
+  ai-usage active       agent threads running right now and for how long\n  ai-usage short        one line for tmux / prompts, e.g.  Cl 23%·41%  Cx 12%·64%
+  ai-usage statusline   Claude Code status line hook (reads JSON on stdin)
+
+Only the standard library is used. Credentials are read-only and never printed.
+"""
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+
+HOME = os.path.expanduser("~")
+CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.join(HOME, ".cache")), "ai-usage")
+CLAUDE_HOOK = os.path.join(CACHE, "claude-statusline.json")
+CLAUDE_API = os.path.join(CACHE, "claude-api.json")
+CLAUDE_CREDS = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(HOME, ".claude")), ".credentials.json")
+CODEX_HOME = os.environ.get("CODEX_HOME", os.path.join(HOME, ".codex"))
+
+HOOK_FRESH = 30 * 60      # statusline data younger than this is trusted as-is
+API_MIN_INTERVAL = 10 * 60
+API_BACKOFF = 30 * 60
+
+
+# ───────────────────────── helpers ─────────────────────────
+def read_json(path, default=None):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def write_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+
+
+def to_epoch(v):
+    """Epoch seconds from an epoch number or an ISO-8601 string."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v) / 1000 if v > 1e12 else float(v)
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def window(wid, label, pct, resets_at):
+    now = time.time()
+    pct = None if pct is None else max(0.0, min(100.0, float(pct)))
+    resets_at = to_epoch(resets_at)
+    # A window that already rolled over has, by definition, been reset.
+    if resets_at is not None and resets_at < now:
+        pct, resets_at = 0.0, None
+    return {"id": wid, "label": label, "pct": pct, "resets_at": resets_at}
+
+
+# ───────────────────────── Claude ─────────────────────────
+def claude_plan():
+    o = (read_json(CLAUDE_CREDS, {}) or {}).get("claudeAiOauth", {})
+    return o.get("subscriptionType")
+
+
+def claude_from_api():
+    state = read_json(CLAUDE_API, {}) or {}
+    now = time.time()
+    if now < state.get("next_try", 0):
+        return state.get("data"), state.get("fetched")
+    token = ((read_json(CLAUDE_CREDS, {}) or {}).get("claudeAiOauth") or {}).get("accessToken")
+    if not token:
+        return state.get("data"), state.get("fetched")
+    req = urllib.request.Request(
+        "https://api.anthropic.com/api/oauth/usage",
+        headers={"Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20",
+                 "User-Agent": "ai-usage/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            raw = json.load(r)
+        data = {
+            "five_hour": {"pct": (raw.get("five_hour") or {}).get("utilization"),
+                          "resets_at": (raw.get("five_hour") or {}).get("resets_at")},
+            "seven_day": {"pct": (raw.get("seven_day") or {}).get("utilization"),
+                          "resets_at": (raw.get("seven_day") or {}).get("resets_at")},
+        }
+        write_json(CLAUDE_API, {"data": data, "fetched": now, "next_try": now + API_MIN_INTERVAL})
+        return data, now
+    except urllib.error.HTTPError as e:
+        wait = API_BACKOFF
+        try:
+            wait = max(wait, int(e.headers.get("retry-after", 0)))
+        except (TypeError, ValueError):
+            pass
+        state.update({"next_try": now + wait, "last_error": f"HTTP {e.code}"})
+        write_json(CLAUDE_API, state)
+    except (urllib.error.URLError, OSError, ValueError):
+        state.update({"next_try": now + API_MIN_INTERVAL, "last_error": "network"})
+        write_json(CLAUDE_API, state)
+    return state.get("data"), state.get("fetched")
+
+
+def claude_provider():
+    p = {"id": "claude", "name": "Claude", "plan": claude_plan(), "windows": [], "updated": None, "note": ""}
+    hook = read_json(CLAUDE_HOOK)
+    data, updated = None, None
+    if hook and time.time() - hook.get("ts", 0) < HOOK_FRESH:
+        data, updated = hook, hook["ts"]
+    else:
+        api, fetched = claude_from_api()
+        if api:
+            data, updated = api, fetched
+        elif hook:
+            data, updated = hook, hook["ts"]
+    if not data:
+        p["note"] = "No data yet. Start Claude Code once (status line hook) or wait for the API fallback."
+        return p
+    p["updated"] = updated
+    p["windows"] = [
+        window("5h", "5-hour", (data.get("five_hour") or {}).get("pct"), (data.get("five_hour") or {}).get("resets_at")),
+        window("7d", "Weekly", (data.get("seven_day") or {}).get("pct"), (data.get("seven_day") or {}).get("resets_at")),
+    ]
+    return p
+
+
+def cmd_statusline():
+    """Claude Code status line hook: remember the limits, print a short line."""
+    try:
+        d = json.load(sys.stdin)
+    except ValueError:
+        return
+    rl = d.get("rate_limits") or {}
+    fh, sd = rl.get("five_hour") or {}, rl.get("seven_day") or {}
+    if fh or sd:
+        write_json(CLAUDE_HOOK, {
+            "ts": time.time(),
+            "five_hour": {"pct": fh.get("used_percentage"), "resets_at": fh.get("resets_at")},
+            "seven_day": {"pct": sd.get("used_percentage"), "resets_at": sd.get("resets_at")},
+        })
+    parts = []
+    model = (d.get("model") or {}).get("display_name")
+    if model:
+        parts.append(model)
+    if fh.get("used_percentage") is not None:
+        parts.append(f"5h {fh['used_percentage']:.0f}%")
+    if sd.get("used_percentage") is not None:
+        parts.append(f"7d {sd['used_percentage']:.0f}%")
+    print(" · ".join(parts))
+
+
+# ───────────────────────── Codex ─────────────────────────
+def codex_provider():
+    p = {"id": "codex", "name": "Codex", "plan": None, "windows": [], "updated": None, "note": ""}
+    root = os.path.join(CODEX_HOME, "sessions")
+    files = []
+    for dp, _, fns in os.walk(root):
+        for fn in fns:
+            if fn.startswith("rollout-") and fn.endswith(".jsonl"):
+                fp = os.path.join(dp, fn)
+                try:
+                    files.append((os.path.getmtime(fp), fp))
+                except OSError:
+                    pass
+    files.sort(reverse=True)
+    for _, fp in files[:25]:
+        try:
+            with open(fp, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - 512 * 1024))
+                tail = f.read().decode("utf-8", "replace").splitlines()
+        except OSError:
+            continue
+        for line in reversed(tail):
+            if '"rate_limits"' not in line or '"primary":{' not in line:
+                continue
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            rl = (ev.get("payload") or ev).get("rate_limits") or {}
+            prim, sec = rl.get("primary") or {}, rl.get("secondary") or {}
+            if not prim and not sec:
+                continue
+            p["plan"] = rl.get("plan_type")
+            p["updated"] = to_epoch(ev.get("timestamp"))
+            for w in (prim, sec):
+                if not w:
+                    continue
+                mins = w.get("window_minutes") or 0
+                wid, label = ("5h", "5-hour") if mins and mins <= 360 else ("7d", "Weekly")
+                p["windows"].append(window(wid, label, w.get("used_percent"), w.get("resets_at")))
+            return p
+    p["note"] = "No Codex rate-limit snapshot found yet (use Codex once, signed in with ChatGPT)."
+    return p
+
+
+
+# ───────────────────────── Antigravity ─────────────────────────
+AGY_CACHE = os.path.join(CACHE, "antigravity.json")
+AGY_INTERVAL = 5 * 60
+
+
+def agy_rows():
+    """Rows of `agy -p /usage`: group, window, remaining %, reset (tab separated). Cached."""
+    import shutil
+    import subprocess
+    st = read_json(AGY_CACHE, {}) or {}
+    now = time.time()
+    if now < st.get("next_try", 0):
+        return st.get("rows"), st.get("fetched")
+    exe = shutil.which("agy") or os.path.join(HOME, ".local", "bin", "agy")
+    st["next_try"] = now + 60            # also acts as a lock against parallel callers
+    write_json(AGY_CACHE, st)
+    try:
+        out = subprocess.run([exe, "-p", "/usage"], capture_output=True, text=True, timeout=45,
+                             cwd=HOME, stdin=subprocess.DEVNULL).stdout
+    except (OSError, subprocess.SubprocessError):
+        return st.get("rows"), st.get("fetched")
+    rows = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 3 and parts[2].strip().endswith("%"):
+            rows.append([parts[0].strip(), parts[1].strip(), parts[2].strip(), parts[3].strip() if len(parts) > 3 else ""])
+    if rows:
+        write_json(AGY_CACHE, {"rows": rows, "fetched": now, "next_try": now + AGY_INTERVAL})
+        return rows, now
+    return st.get("rows"), st.get("fetched")
+
+
+def antigravity_provider():
+    p = {"id": "antigravity", "name": "Antigravity", "plan": None, "windows": [], "updated": None, "note": ""}
+    rows, fetched = agy_rows()
+    if not rows:
+        p["note"] = "No data. Sign in with `agy` once; `agy -p /usage` must print the quota table."
+        return p
+    p["updated"] = fetched
+    for group, win, remaining, reset in rows:
+        kind = "5h" if "five hour" in win.lower() else "7d" if "weekly" in win.lower() else None
+        if kind is None:
+            continue
+        try:
+            used = 100.0 - float(remaining.rstrip("%"))
+        except ValueError:
+            continue
+        # The general "Claude and GPT" pool feeds the compact 5h/7d numbers, other pools stay detail-only.
+        primary = group.lower().startswith("claude")
+        wid = kind if primary else f"{group.lower().replace(' ', '-')}-{kind}"
+        label = f"{group.replace(' models', '').replace('Claude and GPT', 'Claude/GPT')} · {'5-hour' if kind == '5h' else 'Weekly'}"
+        p["windows"].append(window(wid, label, used, reset or None))
+    p["windows"].sort(key=lambda w: (w["id"] not in ("5h", "7d"), w["label"]))
+    return p
+
+
+# ───────────────────────── OpenCode Go ─────────────────────────
+OPENCODE_CACHE = os.path.join(CACHE, "opencode-go.json")
+OPENCODE_INTERVAL = 5 * 60
+
+
+def opencode_keys():
+    import glob
+    out = []
+    for f in sorted(glob.glob(os.path.join(HOME, ".cli-proxy-api", "opencode-go-key-*.json"))):
+        d = read_json(f, {}) or {}
+        if d.get("api_key") and not d.get("disabled"):
+            lab = d.get("label") or ""
+            out.append(("" if lab.lower().startswith("opencode go credential") or len(lab) > 24 else lab, d["api_key"], os.path.basename(f)[-13:-5]))
+    return out
+
+
+def opencode_providers():
+    keys = opencode_keys()
+    st = read_json(OPENCODE_CACHE, {}) or {}
+    now = time.time()
+    results = st.get("results", {})
+    if now >= st.get("next_try", 0):
+        st["next_try"] = now + 60
+        write_json(OPENCODE_CACHE, st)
+        ok = False
+        for _, key, tag in keys:
+            req = urllib.request.Request("https://opencode.ai/zen/go/v1/usage",
+                                         headers={"Authorization": f"Bearer {key}", "User-Agent": "ai-usage/1.0"})
+            try:
+                with urllib.request.urlopen(req, timeout=8) as r:
+                    results[tag] = (json.load(r) or {}).get("usage")
+                    ok = True
+            except (urllib.error.URLError, OSError, ValueError):
+                pass
+        write_json(OPENCODE_CACHE, {"results": results, "fetched": now if ok else st.get("fetched"),
+                                    "next_try": now + (OPENCODE_INTERVAL if ok else 120)})
+        st["fetched"] = now if ok else st.get("fetched")
+    provs = []
+    for n, (label, _, tag) in enumerate(keys, 1):
+        p = {"id": f"opencode{n}", "name": f"OpenCode Go{(' · ' + label) if label else ' #' + str(n)}",
+             "plan": None, "windows": [], "updated": st.get("fetched"), "note": ""}
+        u = results.get(tag) or {}
+        for wid, name, key in (("5h", "5-hour", "rolling"), ("7d", "Weekly", "weekly"), ("30d", "Monthly", "monthly")):
+            w = u.get(key)
+            if w:
+                p["windows"].append(window(wid, name, w.get("percent"), w.get("resetsAt")))
+        if not p["windows"]:
+            p["note"] = "No data (offline or key rejected)."
+        provs.append(p)
+    return provs
+
+
+
+# ───────────────────────── live activity ─────────────────────────
+def _alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _proc_running(pattern):
+    import subprocess
+    try:
+        return subprocess.run(["pgrep", "-f", pattern], capture_output=True, timeout=3).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _tail_lines(path, size=256 * 1024):
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        f.seek(max(0, f.tell() - size))
+        return f.read().decode("utf-8", "replace").splitlines()
+
+
+def active_claude():
+    import glob
+    out = []
+    for f in glob.glob(os.path.join(os.path.dirname(CLAUDE_CREDS), "sessions", "*.json")):
+        d = read_json(f)
+        if not isinstance(d, dict) or d.get("status") != "busy" or not _alive(d.get("pid")):
+            continue
+        since = to_epoch(d.get("statusUpdatedAt") or d.get("updatedAt"))
+        if since:
+            out.append({"tool": "claude", "project": os.path.basename(d.get("cwd") or "") or "~",
+                        "name": d.get("name") or "", "since": since})
+    return out
+
+
+def active_codex():
+    out = []
+    if not _proc_running(r"(^|/)codex( |$)"):
+        return out
+    root = os.path.join(CODEX_HOME, "sessions")
+    now = time.time()
+    files = []
+    for dp, _, fns in os.walk(root):
+        for fn in fns:
+            if fn.startswith("rollout-") and fn.endswith(".jsonl"):
+                fp = os.path.join(dp, fn)
+                try:
+                    if now - os.path.getmtime(fp) < 900:
+                        files.append(fp)
+                except OSError:
+                    pass
+    for fp in files:
+        try:
+            state, since = None, None
+            for line in _tail_lines(fp):
+                if '"task_started"' in line or '"task_complete"' in line or '"turn_aborted"' in line:
+                    ev = json.loads(line)
+                    t = (ev.get("payload") or {}).get("type")
+                    state = "run" if t == "task_started" else "idle"
+                    since = to_epoch(ev.get("timestamp"))
+            if state != "run" or not since:
+                continue
+            with open(fp, "rb") as f:
+                meta = json.loads(f.readline().decode("utf-8", "replace"))
+            cwd = (meta.get("payload") or {}).get("cwd") or ""
+            out.append({"tool": "codex", "project": os.path.basename(cwd) or "~", "name": "", "since": since})
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def active_opencode():
+    import subprocess
+    if not _proc_running("opencode serve"):
+        return []
+    try:
+        r = subprocess.run([os.path.join(HOME, ".opencode", "bin", "opencode"), "api", "GET", "/api/session/active"],
+                           capture_output=True, text=True, timeout=6, cwd=HOME)
+        data = (json.loads(r.stdout).get("data") or {})
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+    st = read_json(os.path.join(CACHE, "opencode-active.json"), {}) or {}
+    now = time.time()
+    items = data.items() if isinstance(data, dict) else enumerate(data)
+    out, seen = [], {}
+    for key, v in items:
+        v = v if isinstance(v, dict) else {}
+        sid = str(v.get("id") or v.get("sessionID") or key)
+        t = v.get("time") if isinstance(v.get("time"), dict) else {}
+        since = to_epoch(v.get("since") or v.get("startedAt") or t.get("start") or t.get("created"))
+        since = since or st.get(sid) or now          # unknown start: count from first sighting
+        seen[sid] = since
+        out.append({"tool": "opencode", "project": os.path.basename(v.get("directory") or "") or "opencode",
+                    "name": v.get("title") or "", "since": since})
+    write_json(os.path.join(CACHE, "opencode-active.json"), seen)
+    return out
+
+
+def active_threads():
+    out = []
+    for fn in (active_claude, active_codex, active_opencode):
+        try:
+            out += fn()
+        except Exception:                       # one broken source must not hide the others
+            pass
+    now = time.time()
+    for a in out:
+        a["minutes"] = max(0, int((now - a["since"]) // 60))
+    out.sort(key=lambda a: a["since"])
+    return out
+
+
+TOOL_NAMES = {"claude": "Claude", "codex": "Codex", "opencode": "OpenCode"}
+TOOL_TAGS = {"claude": "Cl", "codex": "Cx", "opencode": "Oc"}
+
+
+# ───────────────────────── output ─────────────────────────
+def collect():
+    return {"generated": time.time(), "active": active_threads(),
+            "providers": [claude_provider(), codex_provider(), antigravity_provider()] + opencode_providers()}
+
+
+def fmt_dur(secs):
+    secs = int(max(0, secs))
+    d, rem = divmod(secs, 86400)
+    h, rem = divmod(rem, 3600)
+    m = rem // 60
+    if d:
+        return f"{d}d {h}h"
+    if h:
+        return f"{h}h {m:02d}m"
+    return f"{m}m"
+
+
+def color(pct):
+    return "\033[32m" if pct < 60 else "\033[33m" if pct < 85 else "\033[31m"
+
+
+def cmd_active():
+    act = active_threads()
+    if not act:
+        print("no agent thread is running")
+    for a in act:
+        title = f" · {a['name']}" if a["name"] else ""
+        print(f"\033[1;35m●\033[0m {TOOL_NAMES.get(a['tool'], a['tool'])} · {a['project']}{title} · running {fmt_dur(time.time() - a['since'])}")
+
+
+def cmd_show():
+    data, now = collect(), time.time()
+    for a in data["active"]:
+        title = f" · {a['name']}" if a["name"] else ""
+        print(f"\033[1;35m●\033[0m \033[1m{TOOL_NAMES.get(a['tool'], a['tool'])}\033[0m · {a['project']}{title} · running {fmt_dur(now - a['since'])}")
+    if data["active"]:
+        print()
+    for p in data["providers"]:
+        plan = f" ({p['plan']})" if p["plan"] else ""
+        print(f"\033[1m{p['name']}\033[0m{plan}")
+        if not p["windows"]:
+            print(f"  \033[2m{p['note']}\033[0m")
+            continue
+        for w in p["windows"]:
+            if w["pct"] is None:
+                continue
+            filled = round(w["pct"] / 10)
+            bar = color(w["pct"]) + "█" * filled + "\033[2m" + "░" * (10 - filled) + "\033[0m"
+            reset = f"resets in {fmt_dur(w['resets_at'] - now)}" if w["resets_at"] else "window idle"
+            print(f"  {w['label']:<7} {bar} {w['pct']:5.1f}%   {reset}")
+        if p["updated"]:
+            print(f"  \033[2mupdated {fmt_dur(now - p['updated'])} ago\033[0m")
+    print()
+
+
+def cmd_short():
+    out = []
+    act = active_threads()
+    if act:
+        out.append(" ".join(f"▶{TOOL_TAGS.get(a['tool'], a['tool'][:2])} {a['minutes']}m" for a in act) + " │")
+    for p in collect()["providers"]:
+        vals = {w["id"]: w["pct"] for w in p["windows"] if w["pct"] is not None}
+        if vals:
+            tag = {"claude": "Cl", "codex": "Cx", "antigravity": "Ag"}.get(p["id"], "Oc" + p["id"][len("opencode"):])
+            out.append(f"{tag} {vals.get('5h', 0):.0f}%·{vals.get('7d', 0):.0f}%")
+    print("  ".join(out))
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "show"
+    if cmd == "statusline":
+        cmd_statusline()
+    elif cmd == "json":
+        print(json.dumps(collect()))
+    elif cmd == "active":
+        cmd_active()
+    elif cmd == "short":
+        cmd_short()
+    elif cmd in ("-h", "--help", "help"):
+        print(__doc__)
+    else:
+        cmd_show()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,56 @@
+# Minimal one-line prompt, Ryoku Dark colours. No pills, no powerline glyphs.
+#   ~/Coding/rice  main +2 ~1 ❯                                          14:32
+add_newline = false
+command_timeout = 500
+format = "$directory$git_branch$git_status$python$cmd_duration$character"
+right_format = "$time"
+
+[directory]
+style = "bold #e0707a"
+format = "[$path]($style)[$read_only](#ef6f6c) "
+truncation_length = 2
+truncate_to_repo = true
+truncation_symbol = "…/"
+home_symbol = "~"
+read_only = "🔒"
+
+[git_branch]
+style = "#b99ea0"
+format = "[$branch]($style) "
+
+[git_status]
+style = "#e3b36b"
+format = "[$all_status$ahead_behind]($style) "
+conflicted = "!"
+ahead = "↑"
+behind = "↓"
+diverged = "↕"
+untracked = "?"
+modified = "~"
+staged = "+"
+deleted = "-"
+renamed = "»"
+stashed = ""
+
+[python]
+style = "#8fd1b8"
+format = "[(\\($virtualenv\\))]($style) "
+detect_extensions = []
+detect_files = []
+detect_folders = []
+
+[cmd_duration]
+min_time = 3000
+style = "#6b5558"
+format = "[$duration]($style) "
+
+[time]
+disabled = false
+time_format = "%H:%M"
+style = "#6b5558"
+format = "[$time]($style)"
+
+[character]
+success_symbol = "[❯](bold #ff8a94)"
+error_symbol = "[❯](bold #ef6f6c)"
+vimcmd_symbol = "[❮](bold #8fd1b8)"

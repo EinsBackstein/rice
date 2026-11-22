@@ -1,0 +1,14 @@
+{
+    "KPlugin": {
+        "Id": "org.local.aiusage",
+        "Name": "AI Usage",
+        "Description": "5-hour and weekly plan limits for Claude and Codex",
+        "Icon": "utilities-system-monitor",
+        "Authors": [{ "Name": "local" }],
+        "Category": "System Information",
+        "License": "MIT",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "KPackageStructure": "Plasma/Applet"
+}

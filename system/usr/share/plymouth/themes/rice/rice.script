@@ -1,0 +1,60 @@
+# Rice — wallpaper background with a small dot spinner. No bars, no logo.
+
+sw = Window.GetWidth();
+sh = Window.GetHeight();
+
+# Wallpaper, scaled to "cover" the screen and centred.
+wp = Image("wallpaper.png");
+scale = sw / wp.GetWidth();
+if (sh / wp.GetHeight() > scale) scale = sh / wp.GetHeight();
+bw = Math.Int(wp.GetWidth() * scale + 1);
+bh = Math.Int(wp.GetHeight() * scale + 1);
+bg = Sprite(wp.Scale(bw, bh));
+bg.SetPosition((sw - bw) / 2, (sh - bh) / 2, -100);
+
+# Spinner
+FRAMES = 8;
+for (i = 0; i < FRAMES; i++) frame[i] = Image("spin-" + i + ".png");
+spin = Sprite(frame[0]);
+spin.SetPosition(sw / 2 - frame[0].GetWidth() / 2, sh * 0.86 - frame[0].GetHeight() / 2, 10);
+
+global.tick = 0;
+fun refresh_callback ()
+  {
+    global.tick++;
+    spin.SetImage(frame[Math.Int(global.tick / 5) % FRAMES]);
+  }
+Plymouth.SetRefreshFunction(refresh_callback);
+
+# Disk passphrase prompt (only used with an encrypted root)
+prompt = Sprite();
+bullets = Sprite();
+fun password_callback (prompt_text, bullet_count)
+  {
+    msg = Image.Text(prompt_text, 0.95, 0.86, 0.84);
+    prompt.SetImage(msg);
+    prompt.SetPosition(sw / 2 - msg.GetWidth() / 2, sh * 0.5, 20);
+    dots = "";
+    for (j = 0; j < bullet_count; j++) dots += "•";
+    b = Image.Text(dots + " ", 0.88, 0.44, 0.48);
+    bullets.SetImage(b);
+    bullets.SetPosition(sw / 2 - b.GetWidth() / 2, sh * 0.5 + 40, 20);
+  }
+Plymouth.SetDisplayPasswordFunction(password_callback);
+fun normal_callback ()
+  {
+    prompt.SetOpacity(0);
+    bullets.SetOpacity(0);
+  }
+Plymouth.SetDisplayNormalFunction(normal_callback);
+
+message = Sprite();
+message.SetPosition(12, 12, 30);
+fun message_callback (text)
+  {
+    message.SetImage(Image.Text(text, 0.95, 0.86, 0.84));
+    message.SetOpacity(1);
+  }
+Plymouth.SetDisplayMessageFunction(message_callback);
+fun hide_message_callback (text) { message.SetOpacity(0); }
+Plymouth.SetHideMessageFunction(hide_message_callback);

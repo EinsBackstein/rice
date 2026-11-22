@@ -1,0 +1,24 @@
+/* rice: Ryoku Dark palette for libadwaita apps (Nautilus etc.) */
+@define-color accent_bg_color #e0707a;
+@define-color accent_fg_color #1c1113;
+@define-color accent_color #f29aa0;
+@define-color window_bg_color #1c1113;
+@define-color window_fg_color #f1dcd6;
+@define-color view_bg_color #1c1113;
+@define-color view_fg_color #f1dcd6;
+@define-color headerbar_bg_color #231619;
+@define-color headerbar_fg_color #f1dcd6;
+@define-color headerbar_border_color #402b30;
+@define-color sidebar_bg_color #231619;
+@define-color sidebar_fg_color #f1dcd6;
+@define-color sidebar_backdrop_color #1f1316;
+@define-color secondary_sidebar_bg_color #1f1316;
+@define-color card_bg_color #2b1b1f;
+@define-color card_fg_color #f1dcd6;
+@define-color popover_bg_color #2b1b1f;
+@define-color popover_fg_color #f1dcd6;
+@define-color dialog_bg_color #231619;
+@define-color dialog_fg_color #f1dcd6;
+@define-color destructive_bg_color #ef6f6c;
+@define-color success_bg_color #8fd1b8;
+@define-color warning_bg_color #e3b36b;

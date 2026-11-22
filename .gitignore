@@ -1,0 +1,9 @@
+# local backups of overwritten files and leftovers from other tools
+backup/
+.opencode/
+*.bak
+*.pre-*
+# never commit credentials
+*.key
+*.env
+auth*.json

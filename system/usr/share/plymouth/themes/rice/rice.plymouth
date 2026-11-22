@@ -1,0 +1,11 @@
+[Plymouth Theme]
+Name=Rice
+Description=Wallpaper background with a minimal dot spinner.
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/rice
+ScriptFile=/usr/share/plymouth/themes/rice/rice.script
+ConsoleLogBackgroundColor=0x000000
+MonospaceFont=Noto Sans Mono 11
+Font=Noto Sans 11
