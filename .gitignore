@@ -6,4 +6,8 @@ backup/
 # never commit credentials
 *.key
 *.env
+*.pem
+*credential*.json
+.credentials.json
 auth*.json
+.netrc
