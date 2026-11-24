@@ -2,7 +2,7 @@
 
 My Kubuntu 26.04 desktop. Plasma 6 on Wayland, Ghostty, Nautilus, a zsh and tmux command line setup, macOS style Alt+C/V/X shortcuts, an AI usage tracker in the panel, a custom boot splash and login screen, and a few font rendering fixes. Colours come from Ryoku Dark: rose on dark.
 
-I built this for one machine, mine. It lives in a private repo so I can reinstall it quickly, not because it is ready for anyone else.
+I built this for one machine, mine. I keep it in git so I can reinstall it quickly, not because it is ready for anyone else.
 
 ## This is a personal setup
 
