@@ -120,7 +120,7 @@ user_files() {
   while IFS= read -r -d '' f; do
     rel="${f#"$REPO/home/"}"
     case "$rel" in
-      .local/share/fonts/*|.config/systemd/user/*|.config/gtk-4.0/rice-adwaita.css) continue ;;  # copied / merged, not linked
+      .local/share/fonts/*|.config/systemd/user/*|.config/gtk-4.0/rice-adwaita.css|.local/share/plasma/plasmoids/*) continue ;;  # copied / merged, not linked
     esac
     backup_and_link "$f" "$HOME/$rel"
   done < <(find "$REPO/home" -type f -print0)
@@ -130,6 +130,20 @@ user_files() {
   run cp -u "$REPO"/home/.local/share/fonts/SpaceGroteskFixed/*.ttf "$HOME/.local/share/fonts/SpaceGroteskFixed/"
   run install -m644 "$REPO/home/.config/systemd/user/xremap.service" "$HOME/.config/systemd/user/xremap.service"
   run fc-cache -f "$HOME/.local/share/fonts"
+
+  # plasmoids: real copies (KPackage rejects symlinks that escape the package root, so the
+  # applet would silently fail to load with "Path traversal attempt detected")
+  local p name dst
+  for p in "$REPO"/home/.local/share/plasma/plasmoids/*/; do
+    name="$(basename "$p")"
+    dst="$HOME/.local/share/plasma/plasmoids/$name"
+    if [[ -e "$dst" || -L "$dst" ]]; then
+      run mkdir -p "$BACKUP/.local/share/plasma/plasmoids"
+      run mv "$dst" "$BACKUP/.local/share/plasma/plasmoids/$name"
+    fi
+    run mkdir -p "$HOME/.local/share/plasma/plasmoids"
+    run cp -a "$p" "$dst"
+  done
 
   # Ubuntu names these differently
   [[ -x /usr/bin/fdfind ]]  && [[ ! -e "$HOME/.local/bin/fd"  ]] && run ln -s /usr/bin/fdfind  "$HOME/.local/bin/fd"

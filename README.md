@@ -34,7 +34,7 @@ Re-run it any time; it is idempotent. Files it would overwrite are moved to `~/.
 ```
 install.sh                 orchestrator
 packages/apt.txt           apt packages (no recommends)
-home/                      mirrors $HOME; files are symlinked into place (fonts + systemd unit are copied)
+home/                      mirrors $HOME; files are symlinked into place (fonts, systemd unit and plasmoids are copied)
   .config/ghostty|tmux|xremap|zsh|starship.toml|systemd/user|gtk-4.0/rice-adwaita.css
   .local/bin/ai-usage
   .local/share/plasma/plasmoids/org.local.aiusage   panel widget
@@ -49,7 +49,7 @@ scripts/
   patch-font.py            regenerates SpaceGroteskFixed from the system font
 docs/cli-tools.md          handbook for every installed tool
 ```
-Because dotfiles are symlinks, **edit the files in this repo** (or the symlinked paths, same thing) and `git commit`. Settings that live in KDE/dconf are expressed in `scripts/apply-settings.sh`; change them there so they survive a reinstall.
+Because dotfiles are symlinks, **edit the files in this repo** (or the symlinked paths, same thing) and `git commit`. Exceptions that are copied because the consumer rejects symlinks into a git checkout: fonts, the systemd unit, and the Plasma plasmoid (KPackage requires everything inside the package root). Re-run `install.sh` after editing those. Settings that live in KDE/dconf are expressed in `scripts/apply-settings.sh`; change them there so they survive a reinstall.
 
 ## AI usage tracker
 
